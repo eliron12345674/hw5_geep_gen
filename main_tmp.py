@@ -148,7 +148,7 @@ class Model(nn.Module):
     def forward(self, x):
         mean, log_var = self.Encoder(x)
         z = self.reparameterization(mean, torch.exp(0.5 * log_var)) # takes exponential function (log var -> var)
-        x_hat            = self.Decoder(z)
+        x_hat = self.Decoder(z)
         
         return x_hat, mean, log_var
     
@@ -194,7 +194,7 @@ def train():
         print("\tEpoch", epoch + 1, "complete!", "\tAverage Loss: ", overall_loss / (batch_idx*batch_size))
         
     print("Finish!!")
-train()
+#train()
 import matplotlib.pyplot as plt
 model.eval()
 
@@ -204,11 +204,42 @@ def show_image(x, idx):
     fig = plt.figure()
     plt.imshow(x[idx].cpu().numpy())
 
+def visualize_images(tensor):
+    num_images, squared_size = tensor.shape
+    img_size = int(squared_size**0.5)
+
+    # Reshape each image to its 2D shape
+    images = tensor.view(num_images, img_size, img_size)
+    images = images.detach().numpy()
+    # Plot all images
+    fig, axes = plt.subplots(1, num_images, figsize=(num_images, 1))
+    for i in range(num_images):
+        ax = axes[i]
+        ax.imshow(images[i], cmap='gray')
+        ax.axis('off')
+
+    plt.show()
+
 with torch.no_grad():
     noise = torch.randn(batch_size, latent_dim).to(DEVICE)
     generated_images = decoder(noise)
 
 show_image(generated_images, idx=12)
 
+image1 = train_set[0]
+image2 = train_set[90]
+
+def transformsDigits(image1, image2):
+    print(f"transforms from {image1[1]} to {image2[1]}")
+    image1 = image1[0].to(DEVICE)
+    image2 = image2[0].to(DEVICE)
+    z1 = model.Encoder(image1)[0][0]
+    z2 = model.Encoder(image2)[0][0]
+    path = torch.stack([z1 + (i / (9)) * (z2 - z1) for i in range(10)])
+    images = model.Decoder(path)
+    visualize_images(images.cpu())
+
+
+transformsDigits(image1, image2)
 
 print('done')
