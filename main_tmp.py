@@ -15,6 +15,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 DATASET_PATH = "../data"
+savedModels_PATH = "finalProduct"
+lossGraph_PATH = "finalGraph"
 
 def add_uniform_noise(sample):
     return sample.float() + torch.rand_like(sample.float())
@@ -33,7 +35,9 @@ latent_dim = 128
 
 lr = 1e-3
 
-epochs = 30
+epochs = 40
+
+static_var = 0.1
 
 transform = transforms.Compose([
 transforms.ToTensor(),
@@ -47,7 +51,7 @@ test_set = MNIST(root=DATASET_PATH, train=False, transform=transform, download=T
 
 train_loader = data.DataLoader(train_set, batch_size=128, shuffle=True, drop_last=True, pin_memory=True)
 val_loader = data.DataLoader(val_set, batch_size=128, shuffle=False, drop_last=False)
-test_loader = data.DataLoader(test_set, batch_size=128, shuffle=False, drop_last=False)
+test_loader = data.DataLoader(test_set, batch_size=16, shuffle=False, drop_last=False)
 
 class Encoder(nn.Module):
     
@@ -110,7 +114,7 @@ class Decoder(nn.Module):
             self.deconvs.append(nn.ConvTranspose2d(num_conv_layers, 1, kernel_size=3, stride=2, padding=1, output_padding=1))
         self.deconv =  nn.ConvTranspose2d(num_conv_layers, 1, kernel_size=3, stride=2, padding=1, output_padding=1)
         # Final deconv layer to get to original input size
-        self.final_deconv = nn.ConvTranspose2d(1, 1, kernel_size=3, stride=1, padding=1)
+        self.final_deconv = nn.ConvTranspose2d(1, 1, kernel_size=3, stride=2, padding=0)
         
         self.LeakyReLU = nn.LeakyReLU(0.2)
         
@@ -125,7 +129,8 @@ class Decoder(nn.Module):
         
         # Process through each deconvolutional layer
         h = self.LeakyReLU(self.deconv(h))
-        h = self.upsample(h)
+        h = self.final_deconv(h)
+        h = h[:,:,:28, :28]
         h = h.view(batch_size, 28, 28) 
         # Final deconvolution to match the original input dimensions
         x_hat = torch.sigmoid(h)
@@ -158,6 +163,46 @@ decoder = Decoder(latent_dim=latent_dim, hidden_dim = hidden_dim, output_dim = x
 
 model = Model(Encoder=encoder, Decoder=decoder).to(DEVICE)
 
+import matplotlib.pyplot as plt
+
+def plotLoss(list1, list2):
+    """
+    Plots two lists in relation to their indices with two y-axes.
+
+    Parameters:
+    list1 (list): The first list of data
+    list2 (list): The second list of data
+    """
+    if len(list1) != len(list2):
+        raise ValueError("Both lists must have the same length.")
+    
+    indices = range(len(list1))
+    
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+    
+    color = 'tab:blue'
+    ax1.set_xlabel('epochs')
+    ax1.set_ylabel('train loss', color=color)
+    ax1.plot(indices, list1, marker='o', linestyle='-', color=color, label='List 1')
+    ax1.tick_params(axis='y', labelcolor=color)
+    
+    ax2 = ax1.twinx()
+    color = 'tab:red'
+    ax2.set_ylabel('test loss', color=color)
+    ax2.plot(indices, list2, marker='s', linestyle='--', color=color, label='List 2')
+    ax2.tick_params(axis='y', labelcolor=color)
+    
+    plt.title('Loss over Epochs')
+    
+    fig.tight_layout()
+    plt.savefig(lossGraph_PATH)
+
+# Example usage
+list1 = [1, 4, 9, 16, 25]
+list2 = [200, 300, 500, 700, 1100]
+#plotLoss(list1, list2)
+
+
 from torch.optim import Adam
 
 BCE_loss = nn.BCELoss()
@@ -174,10 +219,43 @@ optimizer = Adam(model.parameters(), lr=lr)
 print("Start training VAE...")
 model.train()
 
+def validate():
+    overall_loss = 0
+    model.eval()
+    for batch_idx, (x, _) in enumerate(val_loader):
+            x = x.view(batch_size, x_dim)
+            x = x.to(DEVICE)
+
+            x_hat, mean, log_var = model(x)
+            loss = loss_function(x, x_hat, mean, log_var)
+            
+            overall_loss += loss.item()
+    
+    return overall_loss / len(val_loader)
+
+def test():
+    model.eval()
+    overall_loss = 0
+    for batch_idx, (x, _) in enumerate(test_loader):
+            x = x.view(16, x_dim)
+            x = x.to(DEVICE)
+
+            x_hat, mean, log_var = model(x)
+            loss = loss_function(x, x_hat, mean, log_var)
+            
+            overall_loss += loss.item()
+    
+    return overall_loss / len(test_loader)
+
 def train():
+    avgTrainLossList = []
+    avgValLossList = []
+    avgTestLossList = []
     for epoch in range(epochs):
+        model.train()
         overall_loss = 0
         for batch_idx, (x, _) in enumerate(train_loader):
+
             x = x.view(batch_size, x_dim)
             x = x.to(DEVICE)
 
@@ -190,10 +268,22 @@ def train():
             
             loss.backward()
             optimizer.step()
-            
-        print("\tEpoch", epoch + 1, "complete!", "\tAverage Loss: ", overall_loss / (batch_idx*batch_size))
-        
+
+
+        avgLoss = overall_loss / (batch_idx*batch_size)            
+        avgTrainLossList.append(avgLoss)
+        print("\tEpoch", epoch + 1, "complete!", "\tAverage Loss: ", avgLoss)
+
+        TestLoss = test()
+        avgTestLossList.append(TestLoss)
+
+        plotLoss(avgTrainLossList, avgTestLossList)
+
+        torch.save(model.state_dict(), savedModels_PATH)
+
     print("Finish!!")
+
+
 train()
 import matplotlib.pyplot as plt
 model.eval()
@@ -206,6 +296,7 @@ def show_image(x, idx):
 
 with torch.no_grad():
     noise = torch.randn(batch_size, latent_dim).to(DEVICE)
+    model.load_state_dict(torch.load(savedModels_PATH))
     generated_images = decoder(noise)
 
 show_image(generated_images, idx=12)
