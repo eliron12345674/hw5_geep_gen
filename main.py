@@ -15,6 +15,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 DATASET_PATH = "../data"
+SavedModels_PATH = "finalProduct"
 
 def add_uniform_noise(sample):
     return sample.float() + torch.rand_like(sample.float())

@@ -16,13 +16,18 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 DATASET_PATH = "../data"
 savedModels_PATH = "finalProduct"
-lossGraph_PATH = "finalGraph"
+trainGraph_PATH = "TrainGraph"
+testGraph_PATH = "TestGraph"
 
 def add_uniform_noise(sample):
     return sample.float() + torch.rand_like(sample.float())
 
 def scale_to_unit_interval(sample):
     return sample / 255.0
+
+def scale_to_256(sample):
+    return sample * 255
+
 cuda = True
 DEVICE = torch.device("cuda" if cuda else "cpu")
 
@@ -38,6 +43,8 @@ lr = 1e-3
 epochs = 40
 
 static_var = 0.1
+
+torch.manual_seed(torch.seed())
 
 transform = transforms.Compose([
 transforms.ToTensor(),
@@ -111,7 +118,7 @@ class Decoder(nn.Module):
         
         self.deconvs = nn.ModuleList()
         for _ in range(num_conv_layers):
-            self.deconvs.append(nn.ConvTranspose2d(num_conv_layers, 1, kernel_size=3, stride=2, padding=1, output_padding=1))
+            self.deconvs.append(nn.ConvTranspose2d(1, 1, kernel_size=3, stride=2, padding=0, output_padding=0))
         self.deconv =  nn.ConvTranspose2d(num_conv_layers, 1, kernel_size=3, stride=2, padding=1, output_padding=1)
         # Final deconv layer to get to original input size
         self.final_deconv = nn.ConvTranspose2d(1, 1, kernel_size=3, stride=2, padding=0)
@@ -129,7 +136,17 @@ class Decoder(nn.Module):
         
         # Process through each deconvolutional layer
         h = self.LeakyReLU(self.deconv(h))
-        h = self.final_deconv(h)
+                
+        for inde, conv in enumerate(self.deconvs):
+            h_hat = h[:,inde,:,:]
+            #h_hat = h_hat.view(batch_size,14,14)
+            if inde == 1-1:
+                h_cova = conv(h_hat)
+            else: 
+                h_cova += conv(h_hat)
+
+        h = h_cova
+        #h = self.final_deconv(h)
         h = h[:,:,:28, :28]
         h = h.view(batch_size, 28, 28) 
         # Final deconvolution to match the original input dimensions
@@ -155,6 +172,9 @@ class Model(nn.Module):
         z = self.reparameterization(mean, torch.exp(0.5 * log_var)) # takes exponential function (log var -> var)
         x_hat            = self.Decoder(z)
         
+        log_var = torch.full_like(mean, static_var)
+        log_var = log_var.log()
+
         return x_hat, mean, log_var
     
 
@@ -165,42 +185,62 @@ model = Model(Encoder=encoder, Decoder=decoder).to(DEVICE)
 
 import matplotlib.pyplot as plt
 
-def plotLoss(list1, list2):
-    """
-    Plots two lists in relation to their indices with two y-axes.
+def plot_train_test(trainLoss, trainKLD, testLoss, testKLD):
+    epochs = range(1, len(trainLoss) + 1)
+    
+    # Plot for Training data
+    plt.figure(figsize=(12, 5))
 
-    Parameters:
-    list1 (list): The first list of data
-    list2 (list): The second list of data
-    """
-    if len(list1) != len(list2):
-        raise ValueError("Both lists must have the same length.")
-    
-    indices = range(len(list1))
-    
-    fig, ax1 = plt.subplots(figsize=(10, 5))
-    
-    color = 'tab:blue'
-    ax1.set_xlabel('epochs')
-    ax1.set_ylabel('train loss', color=color)
-    ax1.plot(indices, list1, marker='o', linestyle='-', color=color, label='List 1')
-    ax1.tick_params(axis='y', labelcolor=color)
-    
-    ax2 = ax1.twinx()
-    color = 'tab:red'
-    ax2.set_ylabel('test loss', color=color)
-    ax2.plot(indices, list2, marker='s', linestyle='--', color=color, label='List 2')
-    ax2.tick_params(axis='y', labelcolor=color)
-    
-    plt.title('Loss over Epochs')
-    
-    fig.tight_layout()
-    plt.savefig(lossGraph_PATH)
+    # Subplot 1: Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, trainLoss, label='Train Loss', color='blue', marker='o')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Training Loss over Epochs')
+    plt.legend()
+
+    # Subplot 2: KLD
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, trainKLD, label='Train KLD', color='green', marker='o')
+    plt.xlabel('Epochs')
+    plt.ylabel('KLD')
+    plt.title('Training KLD over Epochs')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(trainGraph_PATH)
+    plt.close()
+
+    # Plot for Testing data
+    plt.figure(figsize=(12, 5))
+
+    # Subplot 1: Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, testLoss, label='Test Loss', color='orange', marker='x')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Testing Loss over Epochs')
+    plt.legend()
+
+    # Subplot 2: KLD
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, testKLD, label='Test KLD', color='red', marker='x')
+    plt.xlabel('Epochs')
+    plt.ylabel('KLD')
+    plt.title('Testing KLD over Epochs')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(testGraph_PATH)
+    plt.close()
 
 # Example usage
-list1 = [1, 4, 9, 16, 25]
-list2 = [200, 300, 500, 700, 1100]
-#plotLoss(list1, list2)
+trainLoss = [0.9, 0.7, 0.6, 0.5]
+trainKLD = [0.1, 0.2, 0.15, 0.1]
+testLoss = [0.95, 0.75, 0.65, 0.55]
+testKLD = [0.12, 0.22, 0.17, 0.12]
+
+#plot_train_test(trainLoss, trainKLD, testLoss, testKLD)
 
 
 from torch.optim import Adam
@@ -211,7 +251,7 @@ def loss_function(x, x_hat, mean, log_var):
     reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction='sum')
     KLD      = - 0.5 * torch.sum(1+ log_var - mean.pow(2) - log_var.exp())
 
-    return reproduction_loss + KLD
+    return reproduction_loss, KLD
 
 
 optimizer = Adam(model.parameters(), lr=lr)
@@ -227,7 +267,8 @@ def validate():
             x = x.to(DEVICE)
 
             x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+            entropy, KLD = loss_function(x, x_hat, mean, log_var)
+            loss = entropy + KLD
             
             overall_loss += loss.item()
     
@@ -236,24 +277,30 @@ def validate():
 def test():
     model.eval()
     overall_loss = 0
+    overall_kld = 0
     for batch_idx, (x, _) in enumerate(test_loader):
             x = x.view(16, x_dim)
             x = x.to(DEVICE)
 
             x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+            entropy, KLD = loss_function(x, x_hat, mean, log_var)
+            loss = entropy + KLD
             
-            overall_loss += loss.item()
+            overall_loss += entropy.item()
+            overall_kld += KLD.item()
     
-    return overall_loss / len(test_loader)
+    return overall_loss / len(test_loader), overall_kld / len(test_loader)
 
 def train():
     avgTrainLossList = []
-    avgValLossList = []
+    avgTrainKLDList = []
     avgTestLossList = []
+    avgTestKLDList = []
+
     for epoch in range(epochs):
         model.train()
         overall_loss = 0
+        overall_kld = 0
         for batch_idx, (x, _) in enumerate(train_loader):
 
             x = x.view(batch_size, x_dim)
@@ -262,9 +309,12 @@ def train():
             optimizer.zero_grad()
 
             x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+            entropy, KLD = loss_function(x, x_hat, mean, log_var)
+            loss = entropy + KLD
             
-            overall_loss += loss.item()
+            overall_loss += entropy.item()
+            overall_kld += KLD.item()
+
             
             loss.backward()
             optimizer.step()
@@ -272,12 +322,16 @@ def train():
 
         avgLoss = overall_loss / (batch_idx*batch_size)            
         avgTrainLossList.append(avgLoss)
+        avgKLD = overall_kld / (batch_idx*batch_size)
+        avgTrainKLDList.append(avgKLD)
+
         print("\tEpoch", epoch + 1, "complete!", "\tAverage Loss: ", avgLoss)
 
-        TestLoss = test()
+        TestLoss, TestKLD = test()
         avgTestLossList.append(TestLoss)
+        avgTestKLDList.append(TestKLD)
 
-        plotLoss(avgTrainLossList, avgTestLossList)
+        plot_train_test(avgTrainLossList, avgTrainKLDList, avgTestLossList, avgTestKLDList)
 
         torch.save(model.state_dict(), savedModels_PATH)
 
@@ -298,6 +352,7 @@ with torch.no_grad():
     noise = torch.randn(batch_size, latent_dim).to(DEVICE)
     model.load_state_dict(torch.load(savedModels_PATH))
     generated_images = decoder(noise)
+    generated_images = scale_to_256(generated_images)
 
 show_image(generated_images, idx=12)
 
