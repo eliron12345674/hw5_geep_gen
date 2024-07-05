@@ -15,34 +15,40 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 DATASET_PATH = "../data"
-savedModels_PATH = "finalProduct"
+savedModels_PATH = "finalProduct2"
 lossGraph_PATH = "finalGraph"
+import random
 
-def add_uniform_noise(sample):
-    return sample.float() + torch.rand_like(sample.float())
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-def scale_to_unit_interval(sample):
-    return sample / 255.0
+set_seed(42)
+
 cuda = True
 DEVICE = torch.device("cuda" if cuda else "cpu")
-
+print(DEVICE)
 
 batch_size = 128
 
 x_dim  = 784
 hidden_dim = 128
-latent_dim = 128
+latent_dim = 64
 
 lr = 1e-3
 
-epochs = 40
+epochs = 30
 
 static_var = 0.1
 
 transform = transforms.Compose([
-transforms.ToTensor(),
-add_uniform_noise,
-scale_to_unit_interval
+transforms.ToTensor()
 ])
 
 train_dataset = MNIST(root=DATASET_PATH, train=True, transform=transform, download=True)
@@ -61,11 +67,11 @@ class Encoder(nn.Module):
         
         # Create a list to store convolutional layers
         self.convs = nn.ModuleList([nn.Conv2d(1, 1, kernel_size=3, stride=2, padding=1) for _ in range(num_conv_layers)])
-        
-        self.pool = nn.MaxPool2d(2, 2)
+        self.conv1 = nn.Conv2d(1, 1, kernel_size=3, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1)
         
         # Adjust input_dim to account for the concatenated outputs
-        self.FC_input = nn.Linear(input_dim // 16 * num_conv_layers, hidden_dim)
+        self.FC_input = nn.Linear(input_dim // 4 * num_conv_layers, hidden_dim)
         self.FC_mean  = nn.Linear(hidden_dim, latent_dim)
         self.FC_var   = nn.Linear(hidden_dim, latent_dim)
         
@@ -80,18 +86,18 @@ class Encoder(nn.Module):
         x = x.view(batch_size, 1, 28, 28)
         
         # Process input through each convolutional layer
-        conv_outputs = [self.pool(F.relu(conv(x))) for conv in self.convs]
+        x = self.LeakyReLU(self.conv1(x))
+        x = self.LeakyReLU(self.conv2(x))
         
         # Concatenate outputs along the channel dimension
-        x = torch.cat(conv_outputs, dim=1)
         
         # Flatten the concatenated output
         x = x.view(batch_size, -1)
         
         # Fully connected layers
-        h_ = self.LeakyReLU(self.FC_input(x))
-        mean = self.FC_mean(h_)
-        log_var = self.FC_var(h_)
+        x = self.LeakyReLU(self.FC_input(x))
+        mean = self.FC_mean(x)
+        log_var = self.FC_var(x)
                                                     
         return mean, log_var
     
@@ -104,36 +110,40 @@ class Decoder(nn.Module):
         self.FC_hidden = nn.Linear(latent_dim, hidden_dim)
         
         # Adjusting for the input size to the deconvolution layers
-        deconv_input_dim = (output_dim // 16) * num_conv_layers
+        deconv_input_dim = (output_dim // 4) * num_conv_layers
         self.FC_output = nn.Linear(hidden_dim, deconv_input_dim)
         
-        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
         
         self.deconvs = nn.ModuleList()
         for _ in range(num_conv_layers):
             self.deconvs.append(nn.ConvTranspose2d(num_conv_layers, 1, kernel_size=3, stride=2, padding=1, output_padding=1))
         self.deconv =  nn.ConvTranspose2d(num_conv_layers, 1, kernel_size=3, stride=2, padding=1, output_padding=1)
         # Final deconv layer to get to original input size
-        self.final_deconv = nn.ConvTranspose2d(1, 1, kernel_size=3, stride=2, padding=0)
+        self.deconv1 = nn.ConvTranspose2d(1, 1, kernel_size=3, stride=1, padding=1, output_padding=0)
+        self.deconv2 = nn.ConvTranspose2d(1, 1, kernel_size=3, stride=2, padding=1, output_padding=1)
         
         self.LeakyReLU = nn.LeakyReLU(0.2)
         
     def forward(self, x):
-        h = self.LeakyReLU(self.FC_hidden(x))
+        x = self.LeakyReLU(self.FC_hidden(x))
         
-        h = self.LeakyReLU(self.FC_output(h))
+        x = self.LeakyReLU(self.FC_output(x))
         
         # Reshape to the correct dimensions for deconvolution
-        batch_size = h.size(0)
-        h = h.view(batch_size, -1, 7, 7)  # Assuming the final conv layer outputs 7x7 feature maps
+        batch_size = x.size(0)
+        x = x.view(batch_size, -1, 14, 14)  # Assuming the final conv layer outputs 7x7 feature maps
         
         # Process through each deconvolutional layer
-        h = self.LeakyReLU(self.deconv(h))
-        h = self.final_deconv(h)
-        h = h[:,:,:28, :28]
-        h = h.view(batch_size, 28, 28) 
+        # conv_outputs = [(F.relu(conv(h))) for conv in self.deconvs]
+        # x = torch.cat(conv_outputs, dim=1)
+        x = self.LeakyReLU(self.deconv1(x))
+        x = self.LeakyReLU(self.deconv2(x))
+        # Flatten the concatenated output
+        x = x.view(batch_size, -1)
+    
+        x = x.view(batch_size, 28, 28) 
         # Final deconvolution to match the original input dimensions
-        x_hat = torch.sigmoid(h)
+        x_hat = torch.sigmoid(x)
         x_hat = x_hat.view(batch_size, 784)
         return x_hat
     
@@ -158,8 +168,8 @@ class Model(nn.Module):
         return x_hat, mean, log_var
     
 
-encoder = Encoder(input_dim=x_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, num_conv_layers=4)
-decoder = Decoder(latent_dim=latent_dim, hidden_dim = hidden_dim, output_dim = x_dim, num_conv_layers=4)
+encoder = Encoder(input_dim=x_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, num_conv_layers=1)
+decoder = Decoder(latent_dim=latent_dim, hidden_dim = hidden_dim, output_dim = x_dim, num_conv_layers=1)
 
 model = Model(Encoder=encoder, Decoder=decoder).to(DEVICE)
 
@@ -284,7 +294,7 @@ def train():
     print("Finish!!")
 
 
-train()
+#train()
 import matplotlib.pyplot as plt
 model.eval()
 
@@ -315,7 +325,7 @@ with torch.no_grad():
     model.load_state_dict(torch.load(savedModels_PATH))
     generated_images = decoder(noise)
 
-show_image(generated_images, idx=12)
+
 
 image1 = train_set[0]
 image2 = train_set[90]
