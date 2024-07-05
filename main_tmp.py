@@ -47,6 +47,9 @@ epochs = 50
 
 static_var = 0.1
 
+trainGraph_PATH = "finalTrainGraph.png"
+testGraph_PATH = "finalTestGraph.png"
+
 transform = transforms.Compose([
 transforms.ToTensor()
 ])
@@ -206,6 +209,63 @@ def plotLoss(list1, list2):
     
     fig.tight_layout()
     plt.savefig(lossGraph_PATH)
+
+def plot_train_test(trainLoss, trainKLD, testLoss, testKLD):
+    epochs = range(1, len(trainLoss) + 1)
+    
+    # Plot for Training data
+    plt.figure(figsize=(12, 5))
+
+    # Subplot 1: Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, trainLoss, label='Train Loss', color='blue', marker='o')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Training Loss over Epochs')
+    plt.legend()
+
+    # Subplot 2: KLD
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, trainKLD, label='Train KLD', color='green', marker='o')
+    plt.xlabel('Epochs')
+    plt.ylabel('KLD')
+    plt.title('Training KLD over Epochs')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(trainGraph_PATH)
+    plt.close()
+
+    # Plot for Testing data
+    plt.figure(figsize=(12, 5))
+
+    # Subplot 1: Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, testLoss, label='Test Loss', color='orange', marker='x')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Testing Loss over Epochs')
+    plt.legend()
+
+    # Subplot 2: KLD
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, testKLD, label='Test KLD', color='red', marker='x')
+    plt.xlabel('Epochs')
+    plt.ylabel('KLD')
+    plt.title('Testing KLD over Epochs')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(testGraph_PATH)
+    plt.close()
+
+# Example usage
+trainLoss = [0.9, 0.7, 0.6, 0.5]
+trainKLD = [0.1, 0.2, 0.15, 0.1]
+testLoss = [0.95, 0.75, 0.65, 0.55]
+testKLD = [0.12, 0.22, 0.17, 0.12]
+
+#plot_train_test(trainLoss, trainKLD, testLoss, testKLD)
 
 # Example usage
 list1 = [1, 4, 9, 16, 25]
