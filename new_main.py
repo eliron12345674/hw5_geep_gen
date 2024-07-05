@@ -220,7 +220,7 @@ from torch.optim import Adam
 model = VAE(1,64)
 BCE_loss = nn.BCELoss()
 
-def loss_function(x, x_hat, mean, log_var):
+def calc_elbo(x, x_hat, mean, log_var):
     reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction='sum')
     KLD      = - 0.5 * torch.sum(1+ log_var - mean.pow(2) - log_var.exp())
 
@@ -240,7 +240,7 @@ def validate():
             x = x.to(DEVICE)
 
             x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+            loss = calc_elbo(x, x_hat, mean, log_var)
             
             overall_loss += loss.item()
     
@@ -254,7 +254,7 @@ def test():
             x = x.to(DEVICE)
 
             x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+            loss = calc_elbo(x, x_hat, mean, log_var)
             
             overall_loss += loss.item()
     
@@ -276,7 +276,7 @@ def train():
             optimizer.zero_grad()
 
             x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+            loss = calc_elbo(x, x_hat, mean, log_var)
             
             overall_loss += loss.item()
             

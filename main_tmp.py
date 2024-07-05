@@ -15,7 +15,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 DATASET_PATH = "../data"
-savedModels_PATH = "finalProduct2"
+savedModels_PATH = "finalProduct1"
 lossGraph_PATH = "finalGraph"
 import random
 
@@ -217,11 +217,13 @@ from torch.optim import Adam
 
 BCE_loss = nn.BCELoss()
 
+std = 0.1
 def loss_function(x, x_hat, mean, log_var):
-    reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction='sum')
-    KLD      = - 0.5 * torch.sum(1+ log_var - mean.pow(2) - log_var.exp())
-
-    return reproduction_loss + KLD
+# Gaussian reconstruction loss
+    reproduction_loss = torch.sum((x - x_hat)**2 / (2 * std**2) + torch.log(std * torch.sqrt(torch.tensor(2 * torch.pi))), dim=1)
+    KLD = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp(), dim=1)
+    
+    return torch.mean(reproduction_loss + KLD)
 
 
 optimizer = Adam(model.parameters(), lr=lr)
@@ -327,8 +329,8 @@ with torch.no_grad():
 
 
 
-image1 = train_set[0]
-image2 = train_set[90]
+image1 = train_set[1]
+image2 = train_set[5]
 
 def transformsDigits(image1, image2):
     print(f"transforms from {image1[1]} to {image2[1]}")
