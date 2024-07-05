@@ -43,7 +43,7 @@ latent_dim = 64
 
 lr = 1e-3
 
-epochs = 30
+epochs = 50
 
 static_var = 0.1
 
@@ -296,7 +296,7 @@ def train():
     print("Finish!!")
 
 
-#train()
+train()
 import matplotlib.pyplot as plt
 model.eval()
 
@@ -324,7 +324,7 @@ def visualize_images(tensor):
 
 with torch.no_grad():
     noise = torch.randn(batch_size, latent_dim).to(DEVICE)
-    model.load_state_dict(torch.load(savedModels_PATH))
+    #model.load_state_dict(torch.load(savedModels_PATH))
     generated_images = decoder(noise)
 
 
